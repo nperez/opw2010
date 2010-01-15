@@ -1,0 +1,142 @@
+# This is a sample Vroom input file. It should help you get started.
+#
+# Edit this file with your content. Then run `vroom --vroom` to start
+# the show!
+#
+# See `perldoc Vroom::Vroom` for complete details.
+#
+---- config
+# Basic config options.
+title: Vroom!
+indent: 5
+height: 18
+width: 69
+skip: 0
+
+# The following options are for Gvim usage.
+# vim: gvim
+# fuopt: maxhorz,maxvert
+# guioptions: egmLtT
+# guicursor: a:blinkon0-ver25-Cursor
+# guifont: Bitstream_Vera_Sans_Mono:h18
+
+---- center
+
+Modern Perl for the Worker Pattern
+
+Nicholas Perez ( nperez )
+
+OPW2010
+
+----
+== Modern Perl
+
+* Moose
++   * MOP
++   * Roles
++   * Awesome Extensibility
+
++* POE
++   * Asynchronous events
++   * Vetted against many old and new platforms
++   * Well defined and stable API
++   * Single or multiple processes (via fork)
+
+----
+== Worker Pattern
+
+* The worker pattern is essentially the concept of creating units of work for 
+    the consumption of multiple threads of execution.
+
++    ------------------
+    |                |
+    |  Unit of Work  |
+    ------------------
+            |
+            |
+            v
++    --------------------------------
+    |         Worker Pool          |
+    |         /        \           |
+    |        /          \          |
+    | ------------  -------------  |
+    | |  Worker  |  |  Worker   |  |
+    | ------------  -------------  |
+    --------------------------------
+                   |
+                   |
+                   v
++           -----------------
+           |               |
+           |      WIN      |
+           -----------------
+    
+----
+== Even more Moderner Perl
+
+* MooseX::Declare
++    * Method signatures
++        * Automagical type constraint checking
++        * Easily decorated with Roles
++        * Named, positional, and invocant parameters
++    * Class and Role blocks
++        * Easy scoping
++        * Flexible consumption and declaration
+
++* MooseX::CompileTime::Traits
++    * Easily give any class the ability to consume traits at compile time
++    * Works for Roles too
+
++* POEx::*
++    * Role::SessionInstantiation
++        * Turns Moose objects into POE::Sessions
++        * Does lots of evil magic to be transparent
++        * Provides are more direct implementation than others
++    * PubSub
++        * Simple messaging system
++        * Allows easy push semantics for POE
++        * Easily fits into any kind of asynchronous system that needs event notification
+
+----
+== POEx::WorkerPool
+
+* Combines the best of Moose and POE to implement the worker pattern
++* Every facet is easily customizable without directly modifying the source
++* Makes implemeting a worker solution simple
+
+---- perl,i4
+
+use MooseX::Declare;
+
+class MyJob
+{
+    with 'POEx::WorkerPool::Role::Job';
+    with 'MooseX::Role::BuildInstanceOf' => { target => 'Some::Logger' };
+    
+    has message => ( is => 'ro', isa => 'Str', required => 1);
+
+    method init_job
+    {
+        foreach my $i (0..1999)
+        {
+            $self->enqueue_step
+            (
+                [
+                    sub { my ($log, $count, $msg) = @_; $log->log("$msg:$count"); },
+                    [$self->logger, $i, $self->message]
+                ]
+            );
+        }
+    }
+}
+
+----
+== 
+
+
+----
+== 
+
+
+----
+== The End
