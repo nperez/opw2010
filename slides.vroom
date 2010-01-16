@@ -9,8 +9,8 @@
 # Basic config options.
 title: Vroom!
 indent: 5
-height: 18
-width: 69
+height: 43
+width: 176
 skip: 0
 
 # The following options are for Gvim usage.
@@ -32,15 +32,15 @@ OPW2010
 == Modern Perl
 
 * Moose
-+   * MOP
-+   * Roles
-+   * Awesome Extensibility
+   * MOP
+   * Roles
+   * Awesome Extensibility
 
 +* POE
-+   * Asynchronous events
-+   * Vetted against many old and new platforms
-+   * Well defined and stable API
-+   * Single or multiple processes (via fork)
+   * Asynchronous events
+   * Vetted against many old and new platforms
+   * Well defined and stable API
+   * Single or multiple processes (via fork)
 
 ----
 == Worker Pattern
@@ -76,26 +76,26 @@ OPW2010
 
 * MooseX::Declare
 +    * Method signatures
-+        * Automagical type constraint checking
-+        * Easily decorated with Roles
-+        * Named, positional, and invocant parameters
+        * Automagical type constraint checking
+        * Easily decorated with Roles
+        * Named, positional, and invocant parameters
 +    * Class and Role blocks
-+        * Easy scoping
-+        * Flexible consumption and declaration
+        * Easy scoping
+        * Flexible consumption and declaration
 
 +* MooseX::CompileTime::Traits
-+    * Easily give any class the ability to consume traits at compile time
-+    * Works for Roles too
+    * Easily give any class the ability to consume traits at compile time
+    * Works for Roles too
 
 +* POEx::*
 +    * Role::SessionInstantiation
-+        * Turns Moose objects into POE::Sessions
-+        * Does lots of evil magic to be transparent
-+        * Provides are more direct implementation than others
+        * Turns Moose objects into POE::Sessions
+        * Does lots of evil magic to be transparent
+        * Provides are more direct implementation than others
 +    * PubSub
-+        * Simple messaging system
-+        * Allows easy push semantics for POE
-+        * Easily fits into any kind of asynchronous system that needs event notification
+        * Simple messaging system
+        * Allows easy push semantics for POE
+        * Easily fits into any kind of asynchronous system that needs event notification
 
 ----
 == POEx::WorkerPool
@@ -105,38 +105,243 @@ OPW2010
 +* Makes implemeting a worker solution simple
 
 ---- perl,i4
-
 use MooseX::Declare;
+use POE;
+use warnings;
+use strict;
 
-class MyJob
+class MyJob with POEx::WorkerPool::Role::Job
 {
-    with 'POEx::WorkerPool::Role::Job';
-    with 'MooseX::Role::BuildInstanceOf' => { target => 'Some::Logger' };
+    with 'MooseX::Role::BuildInstanceOf' =>
+    {
+        target => 'Log::Dispatch',
+        prefix => 'log',
+        args => 
+        [
+            outputs => 
+            [
+                [
+                    'File', 
+                    min_level           => 'info', 
+                    filename            => 'thelog.log', 
+                    close_after_write   => 1,
+                    newline             => 1,
+                ],
+            ],
+        ],
+    };
     
     has message => ( is => 'ro', isa => 'Str', required => 1);
 
     method init_job
     {
-        foreach my $i (0..1999)
+        foreach my $i (0..99)
         {
             $self->enqueue_step
             (
                 [
-                    sub { my ($log, $count, $msg) = @_; $log->log("$msg:$count"); },
-                    [$self->logger, $i, $self->message]
+                    sub { my ($log, $count, $msg) = @_; $log->info("$msg:$count"); },
+                    [$self->log, $i, $self->message]
                 ]
             );
         }
     }
 }
 
+class MyRunner
+{
+    use POEx::Types(':all');
+    use POEx::WorkerPool::Types(':all');
+    use POEx::WorkerPool::WorkerEvents(':all');
+    use MooseX::Types::Moose(':all');
+    use aliased 'POEx::Role::Event';
+
+    with 'POEx::Role::SessionInstantiation';
+    with 'MooseX::Role::BuildInstanceOf' =>
+    {
+        target => 'Log::Dispatch',
+        prefix => 'log',
+        args => 
+        [
+            outputs => 
+            [
+                [
+                    'File', 
+                    min_level           => 'info', 
+                    filename            => 'thelog.log', 
+                    close_after_write   => 1,
+                    newline             => 1,
+                ],
+            ],
+        ],
+    };
+
+    with 'MooseX::Role::BuildInstanceOf' =>
+    {
+        target => 'POEx::WorkerPool',
+        prefix => 'pool',
+        args =>
+        [
+            max_workers => 10,
+            job_classes => ['MyJob'],
+            max_jobs_per_worker => 5,
+            options => {},
+        ],
+    };
+
+    after _start is Event
+    {
+        for(0..49)
+        {
+            $self->subscribe_to_worker($self->pool->enqueue_job(MyJob->new(message => "Job $_ message")));
+        }
+    }
+    
+    my $worker_stops = 0;
+    method worker_stop_processing (SessionID :$worker_id, Int :$completed_jobs, Int :$failed_jobs) is Event
+    {
+        $self->log->info("Worker($worker_id) stopped processing");
+        my $alias = $self->poe->kernel->ID_id_to_session($worker_id)->pubsub_alias;
+        $self->unsubscribe_to_worker($alias);
+        
+        if(++$worker_stops == 50)
+        {
+            $self->pool->halt();
+        }
+    }
+
+    method worker_start_processing (SessionID :$worker_id, Int :$count_jobs) is Event
+    {
+        $self->log->info("Worker($worker_id) has started processing its $count_jobs jobs");
+    }
+    
+    method job_dequeued (SessionID :$worker_id, DoesJob :$job) is Event
+    {
+        $self->log->info("Worker($worker_id) dequeued Job(${\$job->ID})");
+    }
+    
+    method job_enqueued (SessionID :$worker_id, DoesJob :$job) is Event
+    {
+        $self->log->info("Worker($worker_id) queued Job(${\$job->ID})");
+    }
+
+    method job_start (SessionID :$worker_id, DoesJob :$job) is Event
+    {
+        $self->log->info("Worker($worker_id) has started Job(${\$job->ID})");
+    }
+
+    method job_complete (SessionID :$worker_id, DoesJob :$job, Ref :$msg) is Event
+    {
+        $self->log->info("Worker($worker_id) finished Job(${\$job->ID})");
+    }
+
+    method job_progress (SessionID :$worker_id, DoesJob :$job, Int :$percent_complete, Ref :$msg) is Event
+    {
+        $self->log->info("Worker($worker_id) is %$percent_complete with Job(${\$job->ID})");
+    }
+
+    method subscribe_to_worker(SessionRefIdAliasInstantiation $alias)
+    {
+        $self->call($alias, 'subscribe', event_name => +PXWP_JOB_ENQUEUED, event_handler => 'job_enqueued');
+        $self->call($alias, 'subscribe', event_name => +PXWP_START_PROCESSING, event_handler => 'worker_start_processing');
+        $self->call($alias, 'subscribe', event_name => +PXWP_JOB_DEQUEUED, event_handler => 'job_dequeued');
+        $self->call($alias, 'subscribe', event_name => +PXWP_STOP_PROCESSING, event_handler => 'worker_stop_processing');
+        $self->call($alias, 'subscribe', event_name => +PXWP_JOB_COMPLETE, event_handler => 'job_complete');
+        $self->call($alias, 'subscribe', event_name => +PXWP_JOB_PROGRESS, event_handler => 'job_progress');
+        $self->call($alias, 'subscribe', event_name => +PXWP_JOB_START, event_handler => 'job_start');
+    }
+    
+    method unsubscribe_to_worker(SessionRefIdAliasInstantiation $alias)
+    {
+        $self->call($alias, 'cancel', event_name => +PXWP_JOB_ENQUEUED);
+        $self->call($alias, 'cancel', event_name => +PXWP_START_PROCESSING);
+        $self->call($alias, 'cancel', event_name => +PXWP_JOB_DEQUEUED);
+        $self->call($alias, 'cancel', event_name => +PXWP_STOP_PROCESSING);
+        $self->call($alias, 'cancel', event_name => +PXWP_JOB_COMPLETE);
+        $self->call($alias, 'cancel', event_name => +PXWP_JOB_PROGRESS);
+        $self->call($alias, 'cancel', event_name => +PXWP_JOB_START);
+    }
+}
+
+MyRunner->new();
+POE::Kernel->run();
+
 ----
-== 
+== Break down
 
+* POEx::WorkerPool is broken down into several discrete pieces
++    * WorkerPool
+        * Provides facilities for managing workers
+        * Configurable for number of workers, how they are accessed, etc
++    * Worker
+        * Provides the controller side abstraction for the sub process
+        * Has a related PubSub component and publishes a number of events
++    * Guts
+        * Implements the sub process side of the job executor
+        * Works in steps
+        * provides facilities to initialize resources across the process boundary
++    * GutsLoader
+        * Abstracts the steps necessary to load up the Guts
+        * Provides a number of distinct points for customization
++    * Types
+        * Various convenience types for interacting with WorkerPool
++    * Error
+        * A number of specific errors that represent error states within WorkerPool
 
 ----
-== 
+== Customization
 
+* Customization can be easily accomplished at compile time using MooseX::CompileTime::Traits
++* Simply 'use' the module with a 'traits' argument to affect the class
++* Can also jump through some hoops to do some special things
+
+
+---- perl,i4
+
+use MooseX::Declare;
+
+role ExtraInit(CodeRef :$load)
+{
+    with 'POEx::WorkerPool::Role::WorkerPool::Worker::GutsLoader';
+
+    around _build_main
+    {
+        my $code = $self->$orig();
+        return sub { $load->(); $code->() };
+    }
+}
+1;
+
+---- perl,i4
+
+...
+
+class MyExtraInitRunner extends MyRunner
+{
+    use POEx::Types(':all');
+    use POEx::WorkerPool::Types(':all');
+    use POEx::WorkerPool::WorkerEvents(':all');
+    use MooseX::Types::Moose(':all');
+    use aliased 'POEx::Role::Event';
+
+    has postfork_loader => ( is => 'ro', isa => CodeRef, required => 1 );
+
+    after _start is Event
+    {
+        try
+        {
+            Class::MOP::load_class('POEx::WorkerPool::Worker::GutsLoader');
+            POEx::WorkerPool::Worker::GutsLoader->import
+            (
+                traits => [ 'ExtraInit' => { load => $self->postfork_loader }]
+            );
+        }
+        catch($err)
+        {
+            $self->log('Failed to implant the postfork loader: ' . $err);
+            Carp::confess('Failed to implant the postfork loader: ' . $err);
+        }
+...
 
 ----
 == The End
