@@ -7,18 +7,18 @@
 #
 ---- config
 # Basic config options.
-title: Vroom!
+title: Modern Perl for the Worker Pattern
 indent: 5
-height: 43
-width: 176
+height: 24
+width: 80
 skip: 0
 
 # The following options are for Gvim usage.
-# vim: gvim
-# fuopt: maxhorz,maxvert
-# guioptions: egmLtT
-# guicursor: a:blinkon0-ver25-Cursor
-# guifont: Bitstream_Vera_Sans_Mono:h18
+vim: vim
+fuopt: maxhorz,maxvert
+guioptions: egmLtT
+guicursor: a:blinkon0-ver25-Cursor
+guifont: Bitstream_Vera_Sans_Mono:h28
 
 ---- center
 
